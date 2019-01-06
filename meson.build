@@ -1,0 +1,7 @@
+project('curl','c',version:'1.0')
+gnome=import('gnome')
+curl_dep=dependency('libcurl')
+gtk_dep=dependency('gtk+-3.0')
+gsrc=gnome.compile_resources('gresources','gresources.xml')
+ui_lib=shared_library('MyDownloadUi','MyDownloadUi.c',gsrc,dependencies:gtk_dep,install:true,c_args:['-w','-O3'])
+executable('curl','main.c','MyCurl.c',dependencies:[curl_dep,gtk_dep],link_with:ui_lib,install:true,c_args:['-w','-O3'])

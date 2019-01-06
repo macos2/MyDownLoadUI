@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/my/downloadui">
+    	<file compressed="true">MyDownloadUi.glade</file>
+	<file compressed="true">folder-download-symbolic.svg</file>
+	<file compressed="true">image-loading-symbolic.svg</file>
+	<file compressed="true">list-add-symbolic.svg</file>
+	<file compressed="true">object-select-symbolic.svg</file>
+	<file compressed="true">preferences-system-symbolic.svg</file>
+	<file compressed="true">process-stop-symbolic.svg</file>
+	<file compressed="true">view-refresh-symbolic.svg</file>
+	<file compressed="true">window-close-symbolic.svg</file>
+  </gresource>
+</gresources>

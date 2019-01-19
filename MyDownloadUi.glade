@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Generated with glade 3.22.1 -->
+<!-- Generated with glade 3.20.0 -->
 <interface>
   <requires lib="gtk+" version="3.20"/>
   <object class="GtkTextBuffer" id="add_uri_buffer"/>
@@ -484,7 +484,7 @@
                 <child>
                   <object class="GtkTreeViewColumn" id="finish_col_error">
                     <property name="resizable">True</property>
-                    <property name="title" translatable="yes">Error</property>
+                    <property name="title" translatable="yes">Status</property>
                     <property name="reorderable">True</property>
                     <property name="sort_column_id">9</property>
                     <child>
@@ -548,17 +548,63 @@
       </packing>
     </child>
   </template>
+  <object class="GtkAdjustment" id="max_count">
+    <property name="lower">1</property>
+    <property name="upper">99999999</property>
+    <property name="value">1</property>
+    <property name="step_increment">1</property>
+    <property name="page_increment">10</property>
+  </object>
+  <object class="GtkImage" id="state_download">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="resource">/my/downloadui/folder-download-symbolic.svg</property>
+    <property name="icon_size">3</property>
+  </object>
+  <object class="GtkImage" id="state_error">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="resource">/my/downloadui/window-close-symbolic.svg</property>
+    <property name="icon_size">3</property>
+  </object>
+  <object class="GtkImage" id="state_finish">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="resource">/my/downloadui/object-select-symbolic.svg</property>
+    <property name="icon_size">3</property>
+  </object>
+  <object class="GtkImage" id="state_retry">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="resource">/my/downloadui/view-refresh-symbolic.svg</property>
+    <property name="icon_size">3</property>
+  </object>
+  <object class="GtkImage" id="state_stop">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="resource">/my/downloadui/process-stop-symbolic.svg</property>
+    <property name="icon_size">3</property>
+  </object>
+  <object class="GtkImage" id="state_wait">
+    <property name="visible">True</property>
+    <property name="can_focus">False</property>
+    <property name="resource">/my/downloadui/image-loading-symbolic.svg</property>
+    <property name="icon_size">3</property>
+  </object>
+  <object class="GtkAdjustment" id="timeout">
+    <property name="upper">99999999</property>
+    <property name="step_increment">1</property>
+    <property name="page_increment">10</property>
+  </object>
   <object class="GtkDialog" id="add_dialog">
     <property name="width_request">400</property>
     <property name="height_request">300</property>
     <property name="can_focus">False</property>
     <property name="type_hint">dialog</property>
     <property name="deletable">False</property>
+    <property name="transient_for">set_dialog</property>
     <property name="attached_to">MyDownloadUi</property>
     <signal name="delete-event" handler="gtk_widget_hide" swapped="no"/>
-    <child>
-      <placeholder/>
-    </child>
     <child internal-child="vbox">
       <object class="GtkBox">
         <property name="can_focus">False</property>
@@ -835,66 +881,16 @@ If multiple files download,the same-name-operation will apply(add suffix num|ove
       <action-widget response="-6">button2</action-widget>
     </action-widgets>
   </object>
-  <object class="GtkAdjustment" id="max_count">
-    <property name="lower">1</property>
-    <property name="upper">99999999</property>
-    <property name="value">1</property>
-    <property name="step_increment">1</property>
-    <property name="page_increment">10</property>
-  </object>
-  <object class="GtkImage" id="state_download">
-    <property name="visible">True</property>
-    <property name="can_focus">False</property>
-    <property name="resource">/my/downloadui/folder-download-symbolic.svg</property>
-    <property name="icon_size">3</property>
-  </object>
-  <object class="GtkImage" id="state_error">
-    <property name="visible">True</property>
-    <property name="can_focus">False</property>
-    <property name="resource">/my/downloadui/window-close-symbolic.svg</property>
-    <property name="icon_size">3</property>
-  </object>
-  <object class="GtkImage" id="state_finish">
-    <property name="visible">True</property>
-    <property name="can_focus">False</property>
-    <property name="resource">/my/downloadui/object-select-symbolic.svg</property>
-    <property name="icon_size">3</property>
-  </object>
-  <object class="GtkImage" id="state_retry">
-    <property name="visible">True</property>
-    <property name="can_focus">False</property>
-    <property name="resource">/my/downloadui/view-refresh-symbolic.svg</property>
-    <property name="icon_size">3</property>
-  </object>
-  <object class="GtkImage" id="state_stop">
-    <property name="visible">True</property>
-    <property name="can_focus">False</property>
-    <property name="resource">/my/downloadui/process-stop-symbolic.svg</property>
-    <property name="icon_size">3</property>
-  </object>
-  <object class="GtkImage" id="state_wait">
-    <property name="visible">True</property>
-    <property name="can_focus">False</property>
-    <property name="resource">/my/downloadui/image-loading-symbolic.svg</property>
-    <property name="icon_size">3</property>
-  </object>
-  <object class="GtkAdjustment" id="timeout">
-    <property name="upper">99999999</property>
-    <property name="step_increment">1</property>
-    <property name="page_increment">10</property>
-  </object>
   <object class="GtkDialog" id="set_dialog">
     <property name="width_request">400</property>
     <property name="can_focus">False</property>
     <property name="resizable">False</property>
     <property name="type_hint">dialog</property>
     <property name="deletable">False</property>
+    <property name="transient_for">add_dialog</property>
     <property name="attached_to">MyDownloadUi</property>
     <signal name="close" handler="gtk_widget_hide" swapped="no"/>
     <signal name="delete-event" handler="gtk_widget_hide" swapped="no"/>
-    <child>
-      <placeholder/>
-    </child>
     <child internal-child="vbox">
       <object class="GtkBox">
         <property name="can_focus">False</property>

@@ -35,12 +35,15 @@ typedef struct {
 	GMutex *mutex;
 	FILE *file;
 	guint timeout;
-	gchar *uri, *cookie;
+	gchar *uri, *cookie, *suggest_filename, *filename, *local;
 	CURLcode code;
 	gint64 down_start_time_unix;
 	gboolean stop;
 	gboolean resume;
 	gboolean delete;
+	void *set_filename_data;
+	void *set_cookies_data;
+
 } MyCurlThreadData;
 
 typedef struct {
@@ -51,6 +54,11 @@ typedef struct {
 	GThreadPool *pool;
 	guint source_id;
 	GRegex *uri_regex;
+	my_curl_set_cookies_callback set_cookies_callback;
+	my_curl_set_filename_callback set_filename_callback;
+	my_curl_get_cookies_callback get_cookies_callback;
+	GFreeFunc free_filename_data, free_cookies_data;
+
 } MyCurlPrivate;
 
 G_DEFINE_TYPE_WITH_CODE(MyCurl, my_curl, G_TYPE_OBJECT, G_ADD_PRIVATE(MyCurl));
@@ -142,7 +150,8 @@ void my_curl_finish_menu_restart(MyDownloadUi *ui, GtkTreeRowReference *ref,
 			&name, finish_col_local, &local, -1);
 	temp = g_strdup_printf("%s%s%s", local, G_DIR_SEPARATOR_S, name);
 	g_unlink(temp);
-	my_curl_add_download(self, uri, NULL, NULL, NULL, local, name, FALSE);
+	my_curl_add_download(self, uri, NULL, NULL, NULL, local, name, NULL, NULL,
+			FALSE);
 	g_free(temp);
 	g_free(local);
 	g_free(name);
@@ -161,10 +170,19 @@ static void my_curl_init(MyCurl *self) {
 	priv->mutex = g_mutex_new();
 	priv->pool = g_thread_pool_new(my_curl_thread, self, 5, FALSE, NULL);
 	priv->uri_regex = g_regex_new("[\\w]+://[^\\s^\\n^,^\\\"]+", 0, 0, NULL);
+	priv->set_cookies_callback = NULL;
+	priv->set_filename_callback = NULL;
+	priv->get_cookies_callback = NULL;
+	priv->free_cookies_data = NULL;
+	priv->free_filename_data = NULL;
 }
 
-void my_url_ui_add_uri(MyDownloadUi *ui,gchar *uri,gchar *local,gchar *cookies,gchar *name,gchar *prefix,gchar *suffix, MyCurl *mycurl) {
-	my_curl_add_download(mycurl, uri, cookies, prefix, suffix, local, name, FALSE);
+void my_url_ui_add_uri(MyDownloadUi *ui, gchar *uri, gchar *local,
+		gchar *cookies, gchar *name, gchar *prefix, gchar *suffix,
+		MyCurl *mycurl) {
+	my_curl_add_download(mycurl, uri, cookies, prefix, suffix, local, name,
+			NULL, NULL,
+			FALSE);
 }
 
 MyCurl *my_curl_new(MyDownloadUi *ui) {
@@ -182,9 +200,70 @@ MyCurl *my_curl_new(MyDownloadUi *ui) {
 			mycurl);
 	g_signal_connect(priv->ui, "down-menu-resume", my_curl_down_menu_resume,
 			mycurl);
-	g_signal_connect(priv->ui, "down-menu-del", my_curl_down_menu_del,
-			mycurl);
+	g_signal_connect(priv->ui, "down-menu-del", my_curl_down_menu_del, mycurl);
 	return mycurl;
+}
+;
+
+size_t my_curl_write_callback(char *ptr, size_t size, size_t nmemb,
+		MyCurlThreadData *data) {
+	gchar *filename, *dfile;
+	MyCurlPrivate *priv = my_curl_get_instance_private(data->mycurl);
+	same_name_operation sop;
+	gint i = 0;
+	size_t res;
+	if (data->file == NULL) {
+		if (priv->set_filename_callback != NULL) {
+			filename = priv->set_filename_callback(data->suggest_filename,
+					data->set_filename_data);
+			if (filename == NULL || g_strcmp0(filename, "") == 0) {
+				g_free(filename);
+				filename = g_strdup("file");
+			}
+		} else {
+			if (data->suggest_filename != NULL) {
+				filename = g_strdup(data->suggest_filename);
+			} else {
+				filename = g_strdup(data->filename);
+			}
+		}
+		dfile = g_strdup_printf("%s%s%s", data->local, G_DIR_SEPARATOR_S,
+				filename);
+
+		GFile *file = g_file_new_for_path(dfile);
+		GFile *parent = g_file_get_parent(file);
+		gchar *path = g_file_get_path(parent);
+		if (g_access(path, F_OK) != 0) {
+			g_mkdir_with_parents(path, 0775);
+		} else if (g_access(dfile, F_OK) == 0) {
+			g_object_get(priv->ui, "same-name-operation", &sop, NULL);
+			switch (sop) {
+			case skip_download:
+				data->stop = TRUE;
+				break;
+			case add_suffix:
+				while (g_access(dfile, F_OK) == 0) {
+					g_free(dfile);
+					dfile = g_strdup_printf("%s%s%s.%02d", data->local,
+							G_DIR_SEPARATOR_S, filename, i);
+				}
+				break;
+			case over_write:
+			default:
+				break;
+			}
+		}
+		g_free(path);
+		g_object_unref(parent);
+		g_object_unref(file);
+		data->file = fopen(dfile, "w+");
+		g_free(data->filename);
+		g_free(dfile);
+		data->filename = filename;
+	}
+	res = nmemb * size;
+	fwrite(ptr, res, 1, data->file);
+	return res;
 }
 ;
 
@@ -199,7 +278,42 @@ int my_curl_xferinfo_callback(MyCurlThreadData *data, curl_off_t dltotal,
 	return data->stop;
 }
 
+size_t my_curl_header_callback(char *ptr, size_t size, size_t nmemb,
+		MyCurlThreadData *data) {
+	size_t i = 0;
+	gchar *temp1, *temp2;
+	gchar *buf = g_strndup(ptr, size * nmemb);
+	MyCurlPrivate *priv = my_curl_get_instance_private(data->mycurl);
+	if (g_strstr_len(buf, size * nmemb, "Content-Disposition:") != NULL) {
+		temp1 = g_strstr_len(buf, -1, "filename=");
+		if (temp1 != NULL) {
+			temp1 += 9;
+			if (*temp1 == '"') {
+				temp1 += 1;
+			}
+			temp2 = temp1;
+			while (*temp2 != '"' && *temp2 != '\n' && *temp2 != ';'
+					&& *temp2 != ' ') {
+				temp2++;
+			}
+			data->suggest_filename = g_strndup(temp1, temp2 - temp1);
+		}
+	};
+	if (g_strstr_len(buf, -1, "Set-Cookie:") != NULL) {
+		g_mutex_lock(priv->mutex);
+		temp1 = buf + 11;
+		if (priv->set_cookies_callback != NULL) {
+			priv->set_cookies_callback(temp1, data->set_cookies_data);
+		}
+		g_mutex_unlock(priv->mutex);
+	};
+	g_free(buf);
+	return size * nmemb;
+}
+;
+
 void my_curl_thread(MyCurlThreadData *data, MyCurl *self) {
+	gchar *cookie = NULL;
 	CURL *curl;
 	GDateTime *now = g_date_time_new_now_local();
 	data->down_start_time_unix = g_date_time_to_unix(now);
@@ -207,14 +321,23 @@ void my_curl_thread(MyCurlThreadData *data, MyCurl *self) {
 	MyCurlPrivate *priv = my_curl_get_instance_private(self);
 	curl = curl_easy_init();
 	curl_easy_setopt(curl, CURLOPT_URL, data->uri);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, data->file);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, my_curl_write_callback);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, data);
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0);
 	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, my_curl_xferinfo_callback);
 	curl_easy_setopt(curl, CURLOPT_XFERINFODATA, data);
 	curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, data->timeout);
 	curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 10 * 1024);
+	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, my_curl_header_callback);
+	curl_easy_setopt(curl, CURLOPT_HEADERDATA, data);
 	if (data->cookie != NULL)
 		curl_easy_setopt(curl, CURLOPT_COOKIE, data->cookie);
+	if (priv->get_cookies_callback != NULL && data->set_cookies_data != NULL) {
+		cookie = priv->get_cookies_callback(data->set_cookies_data);
+		if (cookie != NULL)
+			curl_easy_setopt(curl, CURLOPT_COOKIE, data->cookie);
+		g_free(cookie);
+	}
 	if (data->resume)
 		curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE, data->resume_offset);
 	data->resume = FALSE;
@@ -223,7 +346,8 @@ void my_curl_thread(MyCurlThreadData *data, MyCurl *self) {
 	priv->down_list = g_list_append(priv->down_list, data);
 	g_mutex_unlock(priv->mutex);
 	data->code = curl_easy_perform(curl);
-	fclose(data->file);
+	if (data->file != NULL)
+		fclose(data->file);
 	g_mutex_lock(priv->mutex);
 	priv->down_list = g_list_remove(priv->down_list, data);
 	priv->finish_list = g_list_append(priv->finish_list, data);
@@ -238,8 +362,8 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 	GtkListStore *dl_store, *fin_store;
 	GtkTreeIter iter;
 	GtkTreePath *path;
-	gchar *uri, *local, *filename, *dfile, *sfile, *err_msg, *start_time;
-	FILE *down_file, *summy_file;
+	gchar *uri, *local, *filename, *sfile, *err_msg, *start_time;
+	FILE *summy_file;
 	GList *list;
 	MyCurlThreadData *data = NULL;
 	GDateTime *now, *elapsed_time;
@@ -262,57 +386,14 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 				down_col_save_local, &local, down_col_name, &filename,
 				down_col_start_time, &start_time, -1);
 		gtk_tree_path_free(path);
-		dfile = g_strdup_printf("%s%s%s", local, G_DIR_SEPARATOR_S, filename);
-		if (g_access(dfile, F_OK) == 0) {
-			switch (sop) {
-			case skip_download:
-				g_free(dfile);
-				dfile = NULL;
-				gtk_list_store_remove(dl_store, &iter);
-				gtk_list_store_append(fin_store, &iter);
-				gtk_list_store_set(fin_store, &iter, finish_col_finish_time,
-						start_time, finish_col_name, filename, finish_col_state,
-						Stop, finish_col_state_pixbuf,
-						my_download_ui_get_download_state_pixbuf(priv->ui,
-								Stop), finish_col_size_format, "Skip",
-						finish_col_local, local, finish_col_uri, uri, -1);
-				gtk_tree_row_reference_free(data->ref);
-				g_free(data->uri);
-				g_free(data);
-				break;
-			case add_suffix:
-				i = 0;
-				sfile = g_strdup_printf("%s.%02d", dfile, i);
-				while (g_access(sfile, F_OK) == 0) {
-					i++;
-					g_free(sfile);
-					sfile = g_strdup_printf("%s.%02u", dfile, i);
-				}
-				g_free(dfile);
-				dfile = sfile;
-				sfile = g_strdup_printf("%s.%02u", filename, i);
-				g_free(filename);
-				filename = sfile;
-				break;
-			case over_write:
-			default:
-				break;
-			}
-		}
-
-		if (dfile != NULL) {
-			gtk_list_store_set(dl_store, &iter, down_col_name, filename, -1);
-			down_file = fopen(dfile, "w+");
-			data->file = down_file;
-			data->timeout = timeout;
-			data->cookie = NULL;
-			data->mutex = g_mutex_new();
-			data->down_start_time_unix = g_date_time_to_unix(now);
-			g_thread_pool_push(priv->pool, data, NULL);
-		}
-		g_free(filename);
-		g_free(dfile);
-		g_free(local);
+		gtk_list_store_set(dl_store, &iter, down_col_name, filename, -1);
+		data->file = NULL;
+		data->timeout = timeout;
+		data->mutex = g_mutex_new();
+		data->down_start_time_unix = g_date_time_to_unix(now);
+		g_thread_pool_push(priv->pool, data, NULL);
+		data->filename = filename;
+		data->local = local;
 		g_free(uri);
 		g_free(start_time);
 		my_download_ui_mutex_unlock(priv->ui);
@@ -362,11 +443,12 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 				SIZE_UNIT[i], temp2, SIZE_UNIT[j]);
 		size_format_double(&speed, &i);
 		speed_format = g_strdup_printf(" %6.2f %s/s ", speed, SIZE_UNIT[i]);
-		gtk_list_store_set(dl_store, &iter, down_col_progress, progress,
-				down_col_file_size, data->dltotal + data->resume_offset,
-				down_col_size_dlsize, size_totalsize_format, down_col_speed,
-				speed_format, down_col_elapsed, elapsed_format, down_col_state,
-				Downloading, down_col_state_pixbuf,
+		gtk_list_store_set(dl_store, &iter, down_col_name, data->filename,
+				down_col_progress, progress, down_col_file_size,
+				data->dltotal + data->resume_offset, down_col_size_dlsize,
+				size_totalsize_format, down_col_speed, speed_format,
+				down_col_elapsed, elapsed_format, down_col_state, Downloading,
+				down_col_state_pixbuf,
 				my_download_ui_get_download_state_pixbuf(priv->ui, Downloading),
 				-1);
 		g_free(elapsed_format);
@@ -398,8 +480,8 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 			curl_easy_cleanup(data->curl);
 			g_free(data);
 		} else {
-			gtk_tree_model_get(dl_store, &iter, down_col_name, &filename,
-					down_col_save_local, &local, -1);
+			gtk_tree_model_get(dl_store, &iter, down_col_save_local, &local,
+					-1);
 			gtk_list_store_remove(dl_store, &iter);
 			gtk_list_store_append(fin_store, &iter);
 			state = Finish;
@@ -413,18 +495,26 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 			gtk_list_store_set(fin_store, &iter, finish_col_state, state,
 					finish_col_state_pixbuf,
 					my_download_ui_get_download_state_pixbuf(priv->ui, state),
-					finish_col_name, filename, finish_col_local, local,
-					finish_col_size, data->dltotal+data->resume_offset, finish_col_size_format,
-					size_totalsize_format, finish_col_finish_time_unix,
-					g_date_time_to_unix(now), finish_col_finish_time,
-					elapsed_format, finish_col_uri, data->uri, finish_col_error,
-					curl_easy_strerror(data->code), -1);
+					finish_col_name, data->filename, finish_col_local, local,
+					finish_col_size, data->dltotal + data->resume_offset,
+					finish_col_size_format, size_totalsize_format,
+					finish_col_finish_time_unix, g_date_time_to_unix(now),
+					finish_col_finish_time, elapsed_format, finish_col_uri,
+					data->uri, finish_col_error, curl_easy_strerror(data->code),
+					-1);
 			g_free(size_totalsize_format);
 			g_free(elapsed_format);
-			g_free(filename);
 			g_free(local);
 			g_free(data->uri);
 			g_free(data->cookie);
+			g_free(data->suggest_filename);
+			g_free(data->filename);
+			if (priv->free_cookies_data != NULL
+					&& data->set_cookies_data != NULL)
+				priv->free_cookies_data(data->set_cookies_data);
+			if (priv->free_filename_data != NULL
+					&& data->set_filename_data != NULL)
+				priv->free_filename_data(data->set_filename_data);
 			g_mutex_free(data->mutex);
 			gtk_tree_row_reference_free(data->ref);
 			curl_easy_cleanup(data->curl);
@@ -442,6 +532,7 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 
 void my_curl_add_download(MyCurl *mycurl, gchar *uri, gchar *cookie,
 		gchar *prefix, gchar *suffix, gchar *save_dir, gchar *f_name,
+		void *cookies_cb_data, void *filename_cb_data,
 		gboolean force_uri_as_filename) {
 	guint i = 0;
 	gboolean uri_as_filename = force_uri_as_filename;
@@ -512,7 +603,7 @@ void my_curl_add_download(MyCurl *mycurl, gchar *uri, gchar *cookie,
 		temp = g_strdup_printf("%s%s%s", prefix, filename, suffix);
 		g_free(filename);
 		filename = temp;
-		data = g_malloc(sizeof(MyCurlThreadData));
+		data = g_malloc0(sizeof(MyCurlThreadData));
 		gtk_list_store_append(dl_store, &iter);
 		gtk_list_store_set(dl_store, &iter, down_col_name, filename,
 				down_col_save_local, save_local, down_col_uri, str,
@@ -531,6 +622,8 @@ void my_curl_add_download(MyCurl *mycurl, gchar *uri, gchar *cookie,
 		data->resume = FALSE;
 		data->resume_offset = 0;
 		data->delete = FALSE;
+		data->set_cookies_data = cookies_cb_data;
+		data->set_filename_data = filename_cb_data;
 		g_async_queue_push(priv->download_queue, data);
 		gtk_tree_path_free(tree_path);
 		g_object_unref(file);
@@ -547,6 +640,30 @@ void my_curl_add_download(MyCurl *mycurl, gchar *uri, gchar *cookie,
 		priv->source_id = g_timeout_add(250, my_curl_watch_func, mycurl);
 }
 ;
+
+void my_curl_set_set_cookies_callback(MyCurl *mycurl,
+		my_curl_set_cookies_callback *cb, GFreeFunc *free_data_func) {
+	MyCurlPrivate *priv = my_curl_get_instance_private(mycurl);
+	priv->set_cookies_callback = cb;
+	priv->free_cookies_data = free_data_func;
+}
+;
+
+void my_curl_set_get_cookies_callback(MyCurl *mycurl,
+		my_curl_get_cookies_callback *cb) {
+	MyCurlPrivate *priv = my_curl_get_instance_private(mycurl);
+	priv->get_cookies_callback = cb;
+}
+;
+
+void my_curl_set_set_filename_callback(MyCurl *mycurl,
+		my_curl_set_filename_callback *cb, GFreeFunc *free_data_func) {
+	MyCurlPrivate *priv = my_curl_get_instance_private(mycurl);
+	priv->set_filename_callback = cb;
+	priv->free_filename_data = free_data_func;
+}
+;
+
 MyDownloadUi *my_curl_get_download_ui(MyCurl *mycurl) {
 	MyCurlPrivate *priv = my_curl_get_instance_private(mycurl);
 	return priv->ui;

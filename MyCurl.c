@@ -43,7 +43,7 @@ typedef struct {
 	gboolean delete;
 	void *set_filename_data;
 	void *set_cookies_data;
-
+	void *get_proxy_data;
 } MyCurlThreadData;
 
 typedef struct {
@@ -57,7 +57,8 @@ typedef struct {
 	my_curl_set_cookies_callback set_cookies_callback;
 	my_curl_set_filename_callback set_filename_callback;
 	my_curl_get_cookies_callback get_cookies_callback;
-	GFreeFunc free_filename_data, free_cookies_data;
+	my_curl_get_proxy_callback get_proxy_callback;
+	GFreeFunc free_filename_data, free_cookies_data, free_proxy_data;
 
 } MyCurlPrivate;
 
@@ -150,8 +151,8 @@ void my_curl_finish_menu_restart(MyDownloadUi *ui, GtkTreeRowReference *ref,
 			&name, finish_col_local, &local, -1);
 	temp = g_strdup_printf("%s%s%s", local, G_DIR_SEPARATOR_S, name);
 	g_unlink(temp);
-	my_curl_add_download(self, uri, NULL, NULL, NULL, local, name, NULL, NULL,
-			FALSE);
+	my_curl_add_download(self, uri, NULL, NULL, NULL, local, name, NULL,NULL, NULL,
+	FALSE);
 	g_free(temp);
 	g_free(local);
 	g_free(name);
@@ -173,16 +174,18 @@ static void my_curl_init(MyCurl *self) {
 	priv->set_cookies_callback = NULL;
 	priv->set_filename_callback = NULL;
 	priv->get_cookies_callback = NULL;
+	priv->get_proxy_callback = NULL;
 	priv->free_cookies_data = NULL;
 	priv->free_filename_data = NULL;
+	priv->free_proxy_data = NULL;
 }
 
 void my_url_ui_add_uri(MyDownloadUi *ui, gchar *uri, gchar *local,
 		gchar *cookies, gchar *name, gchar *prefix, gchar *suffix,
 		MyCurl *mycurl) {
-	my_curl_add_download(mycurl, uri, cookies, prefix, suffix, local, name,
-			NULL, NULL,
-			FALSE);
+	my_curl_add_download(mycurl, uri, cookies, prefix, suffix, local, name,NULL,
+	NULL, NULL,
+	FALSE);
 }
 
 MyCurl *my_curl_new(MyDownloadUi *ui) {
@@ -207,18 +210,21 @@ MyCurl *my_curl_new(MyDownloadUi *ui) {
 
 size_t my_curl_write_callback(char *ptr, size_t size, size_t nmemb,
 		MyCurlThreadData *data) {
-	gchar *filename, *dfile;
+	gchar *filename, *dfile, *t = NULL;
 	MyCurlPrivate *priv = my_curl_get_instance_private(data->mycurl);
 	same_name_operation sop;
 	gint i = 0;
 	size_t res;
 	if (data->file == NULL) {
 		if (priv->set_filename_callback != NULL) {
-			filename = priv->set_filename_callback(data->suggest_filename,
+			t = priv->set_filename_callback(data->suggest_filename,
 					data->set_filename_data);
-			if (filename == NULL || g_strcmp0(filename, "") == 0) {
+			if (t == NULL /*|| g_strcmp0(t, "") == 0*/) {
+				filename = g_strdup(data->filename);
+				g_free(t);
+			} else {
 				g_free(filename);
-				filename = g_strdup("file");
+				filename = t;
 			}
 		} else {
 			if (data->suggest_filename != NULL) {
@@ -245,7 +251,7 @@ size_t my_curl_write_callback(char *ptr, size_t size, size_t nmemb,
 				while (g_access(dfile, F_OK) == 0) {
 					g_free(dfile);
 					dfile = g_strdup_printf("%s%s%s.%02d", data->local,
-							G_DIR_SEPARATOR_S, filename, i);
+					G_DIR_SEPARATOR_S, filename, i);
 				}
 				break;
 			case over_write:
@@ -315,6 +321,7 @@ size_t my_curl_header_callback(char *ptr, size_t size, size_t nmemb,
 void my_curl_thread(MyCurlThreadData *data, MyCurl *self) {
 	gchar *cookie = NULL;
 	CURL *curl;
+	gchar **proxy;
 	GDateTime *now = g_date_time_new_now_local();
 	data->down_start_time_unix = g_date_time_to_unix(now);
 	g_date_time_unref(now);
@@ -330,13 +337,23 @@ void my_curl_thread(MyCurlThreadData *data, MyCurl *self) {
 	curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 10 * 1024);
 	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, my_curl_header_callback);
 	curl_easy_setopt(curl, CURLOPT_HEADERDATA, data);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
 	if (data->cookie != NULL)
 		curl_easy_setopt(curl, CURLOPT_COOKIE, data->cookie);
 	if (priv->get_cookies_callback != NULL && data->set_cookies_data != NULL) {
 		cookie = priv->get_cookies_callback(data->set_cookies_data);
 		if (cookie != NULL)
-			curl_easy_setopt(curl, CURLOPT_COOKIE, data->cookie);
+			curl_easy_setopt(curl, CURLOPT_COOKIE, cookie);
 		g_free(cookie);
+	}
+	if (priv->get_proxy_callback != NULL) {
+		proxy = priv->get_proxy_callback(data->uri, data->get_proxy_data);
+		if (proxy != NULL) {
+			if(g_strcmp0("direct://",proxy[0])!=0)
+				curl_easy_setopt(curl, CURLOPT_PROXY, proxy[0]);
+			g_strfreev(proxy);
+		}
 	}
 	if (data->resume)
 		curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE, data->resume_offset);
@@ -362,7 +379,7 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 	GtkListStore *dl_store, *fin_store;
 	GtkTreeIter iter;
 	GtkTreePath *path;
-	gchar *uri, *local, *filename, *sfile, *err_msg, *start_time;
+	gchar *uri, *local, *filename, *sfile, *err_msg;
 	FILE *summy_file;
 	GList *list;
 	MyCurlThreadData *data = NULL;
@@ -383,8 +400,7 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 		path = gtk_tree_row_reference_get_path(data->ref);
 		gtk_tree_model_get_iter(dl_store, &iter, path);
 		gtk_tree_model_get(dl_store, &iter, down_col_uri, &uri,
-				down_col_save_local, &local, down_col_name, &filename,
-				down_col_start_time, &start_time, -1);
+				down_col_save_local, &local, down_col_name, &filename, -1);
 		gtk_tree_path_free(path);
 		gtk_list_store_set(dl_store, &iter, down_col_name, filename, -1);
 		data->file = NULL;
@@ -395,7 +411,6 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 		data->filename = filename;
 		data->local = local;
 		g_free(uri);
-		g_free(start_time);
 		my_download_ui_mutex_unlock(priv->ui);
 		data = g_async_queue_try_pop_unlocked(priv->download_queue);
 	}
@@ -509,12 +524,15 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 			g_free(data->cookie);
 			g_free(data->suggest_filename);
 			g_free(data->filename);
+			g_free(data->local);
 			if (priv->free_cookies_data != NULL
 					&& data->set_cookies_data != NULL)
 				priv->free_cookies_data(data->set_cookies_data);
 			if (priv->free_filename_data != NULL
 					&& data->set_filename_data != NULL)
 				priv->free_filename_data(data->set_filename_data);
+			if (priv->free_proxy_data != NULL && data->get_proxy_data != NULL)
+				priv->free_proxy_data(data->get_proxy_data);
 			g_mutex_free(data->mutex);
 			gtk_tree_row_reference_free(data->ref);
 			curl_easy_cleanup(data->curl);
@@ -531,8 +549,7 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 }
 
 void my_curl_add_download(MyCurl *mycurl, gchar *uri, gchar *cookie,
-		gchar *prefix, gchar *suffix, gchar *save_dir, gchar *f_name,
-		void *cookies_cb_data, void *filename_cb_data,
+		gchar *prefix, gchar *suffix, gchar *save_dir, gchar *f_name,void *cookies_cb_data,void *filename_cb_data,void *proxy_cb_data,
 		gboolean force_uri_as_filename) {
 	guint i = 0;
 	gboolean uri_as_filename = force_uri_as_filename;
@@ -583,7 +600,7 @@ void my_curl_add_download(MyCurl *mycurl, gchar *uri, gchar *cookie,
 	i = 0;
 	str = g_array_index(str_array, gpointer, i);
 	while (str != NULL) {
-		file = g_file_new_for_uri(str);
+		file = g_file_new_for_path(str);
 		if (file == NULL) {
 			i++;
 			str = g_array_index(str_array, gpointer, i);
@@ -624,15 +641,17 @@ void my_curl_add_download(MyCurl *mycurl, gchar *uri, gchar *cookie,
 		data->delete = FALSE;
 		data->set_cookies_data = cookies_cb_data;
 		data->set_filename_data = filename_cb_data;
+		data->get_proxy_data=proxy_cb_data;
+		data->filename = filename;
 		g_async_queue_push(priv->download_queue, data);
 		gtk_tree_path_free(tree_path);
 		g_object_unref(file);
-		g_free(filename);
 		i++;
 		str = g_array_index(str_array, gpointer, i);
 	}
 	my_download_ui_mutex_unlock(priv->ui);
 	g_date_time_unref(time);
+	g_ptr_array_set_free_func(str_array, g_free);
 	g_array_free(str_array, TRUE);
 	g_free(time_format);
 	g_free(save_local);
@@ -664,8 +683,27 @@ void my_curl_set_set_filename_callback(MyCurl *mycurl,
 }
 ;
 
+void my_curl_set_get_proxy_callback(MyCurl *mycurl,
+		my_curl_get_proxy_callback *cb, GFreeFunc *free_data_func) {
+	MyCurlPrivate *priv = my_curl_get_instance_private(mycurl);
+	priv->get_proxy_callback = cb;
+	priv->free_proxy_data = free_data_func;
+}
+;
+
 MyDownloadUi *my_curl_get_download_ui(MyCurl *mycurl) {
 	MyCurlPrivate *priv = my_curl_get_instance_private(mycurl);
 	return priv->ui;
+}
+;
+
+guint my_curl_get_downloading_count(MyCurl *mycurl, gboolean wait_included) {
+	guint res = 0;
+	MyCurlPrivate *priv = my_curl_get_instance_private(mycurl);
+	res = g_thread_pool_get_num_threads(priv->pool);
+	if (wait_included) {
+		res += g_thread_pool_unprocessed(priv->pool);
+	}
+	return res;
 }
 ;

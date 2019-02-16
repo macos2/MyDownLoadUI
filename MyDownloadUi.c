@@ -423,7 +423,7 @@ static void my_download_ui_class_init(MyDownloadUiClass *klass) {
 	PROP[prop_save_dir] = g_param_spec_string("save-dir", "save directory",
 			"save directory", ".", G_PARAM_READWRITE | G_PARAM_CONSTRUCT);
 	PROP[prop_timeout] = g_param_spec_uint("timeout", "timeout", "timeout", 0,
-	G_MAXUINT, 10, G_PARAM_READWRITE | G_PARAM_CONSTRUCT);
+	G_MAXUINT, 30, G_PARAM_READWRITE | G_PARAM_CONSTRUCT);
 	PROP[prop_uri_as_filename] = g_param_spec_boolean("uri-as-filename",
 			"uri as filename", "uri as filename", FALSE,
 			G_PARAM_READWRITE | G_PARAM_CONSTRUCT);

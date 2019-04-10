@@ -33,7 +33,7 @@ typedef struct {
 	curl_off_t dlnow, dltotal, ulnow, ultotal;
 	curl_off_t pdlnow, pulnow, resume_offset;
 	GMutex *mutex;
-	FILE *file;
+	GIOChannel *file;
 	guint timeout;
 	gchar *uri, *cookie, *suggest_filename, *filename, *local;
 	CURLcode code;
@@ -120,14 +120,19 @@ void my_curl_down_menu_resume(MyDownloadUi *ui, GtkTreeRowReference *ref,
 	GtkTreeModel *model = gtk_tree_row_reference_get_model(ref);
 	gtk_tree_model_get_iter(model, &iter, path);
 	MyCurlThreadData *data;
-	gchar *name, *local, *temp;
-	FILE *file;
+	gchar *name, *local, *temp,*temp2;
+	GFile *file;
 	gtk_tree_model_get(model, &iter, down_col_thread_data, &data, down_col_name,
 			&name, down_col_save_local, &local, -1);
 	if (data->stop == TRUE) {
 		temp = g_strdup_printf("%s%s%s", local, G_DIR_SEPARATOR_S, name);
-		file = fopen(temp, "a");
-		data->file = file;
+#ifdef G_OS_WIN32
+		temp2 = g_convert(temp, -1, "GB2312", "UTF-8", NULL, NULL, NULL);
+		g_free(temp);
+		temp = temp2;
+#endif
+		data->file = g_io_channel_new_file(temp, "a", NULL);
+		g_io_channel_set_encoding(data->file, NULL, NULL);
 		data->stop = FALSE;
 		data->resume = TRUE;
 		data->resume_offset += data->dlnow;
@@ -151,8 +156,9 @@ void my_curl_finish_menu_restart(MyDownloadUi *ui, GtkTreeRowReference *ref,
 			&name, finish_col_local, &local, -1);
 	temp = g_strdup_printf("%s%s%s", local, G_DIR_SEPARATOR_S, name);
 	g_unlink(temp);
-	my_curl_add_download(self, uri, NULL, NULL, NULL, local, name, NULL,NULL, NULL,
-	FALSE);
+	my_curl_add_download(self, uri, NULL, NULL, NULL, local, name, NULL, NULL,
+			NULL,
+			FALSE);
 	g_free(temp);
 	g_free(local);
 	g_free(name);
@@ -183,9 +189,10 @@ static void my_curl_init(MyCurl *self) {
 void my_url_ui_add_uri(MyDownloadUi *ui, gchar *uri, gchar *local,
 		gchar *cookies, gchar *name, gchar *prefix, gchar *suffix,
 		MyCurl *mycurl) {
-	my_curl_add_download(mycurl, uri, cookies, prefix, suffix, local, name,NULL,
-	NULL, NULL,
-	FALSE);
+	my_curl_add_download(mycurl, uri, cookies, prefix, suffix, local, name,
+			NULL,
+			NULL, NULL,
+			FALSE);
 }
 
 MyCurl *my_curl_new(MyDownloadUi *ui) {
@@ -210,11 +217,11 @@ MyCurl *my_curl_new(MyDownloadUi *ui) {
 
 size_t my_curl_write_callback(char *ptr, size_t size, size_t nmemb,
 		MyCurlThreadData *data) {
-	gchar *filename, *dfile, *t = NULL;
+	gchar *filename, *dfile, *t = NULL, *temp;
 	MyCurlPrivate *priv = my_curl_get_instance_private(data->mycurl);
 	same_name_operation sop;
 	gint i = 0;
-	size_t res;
+	gsize res;
 	if (data->file == NULL) {
 		if (priv->set_filename_callback != NULL) {
 			t = priv->set_filename_callback(data->suggest_filename,
@@ -233,9 +240,15 @@ size_t my_curl_write_callback(char *ptr, size_t size, size_t nmemb,
 				filename = g_strdup(data->filename);
 			}
 		}
+
 		dfile = g_strdup_printf("%s%s%s", data->local, G_DIR_SEPARATOR_S,
 				filename);
-
+		//Windows 下文件名编码不是utf-8，
+#ifdef G_OS_WIN32
+		temp = g_convert(dfile, -1, "GB2312", "UTF-8", NULL, NULL, NULL);
+		g_free(dfile);
+		dfile = temp;
+#endif
 		GFile *file = g_file_new_for_path(dfile);
 		GFile *parent = g_file_get_parent(file);
 		gchar *path = g_file_get_path(parent);
@@ -263,14 +276,23 @@ size_t my_curl_write_callback(char *ptr, size_t size, size_t nmemb,
 		g_free(path);
 		g_object_unref(parent);
 		g_object_unref(file);
-		data->file = fopen(dfile, "w+");
-		g_free(data->filename);
+		data->file = g_io_channel_new_file(dfile, "w+", NULL);
+		g_io_channel_set_encoding(data->file, NULL, NULL);
 		g_free(dfile);
+		g_free(data->filename);
+//文件名转回utf-8，防止下载列表显示乱码
+#ifdef G_OS_WIN32
+		data->filename = g_convert(filename, -1, "GB2312", "UTF-8", NULL, NULL, NULL);
+#else
 		data->filename = filename;
+#endif
 	}
-	res = nmemb * size;
-	fwrite(ptr, res, 1, data->file);
+	g_io_channel_write(data->file, ptr, size * nmemb, &res);
 	return res;
+	/*
+	 res = nmemb * size;
+	 fwrite(ptr, res, 1, data->file);
+	 return res;*/
 }
 ;
 
@@ -351,7 +373,7 @@ void my_curl_thread(MyCurlThreadData *data, MyCurl *self) {
 	if (priv->get_proxy_callback != NULL) {
 		proxy = priv->get_proxy_callback(data->uri, data->get_proxy_data);
 		if (proxy != NULL) {
-			if(g_strcmp0("direct://",proxy[0])!=0)
+			if (g_strcmp0("direct://", proxy[0]) != 0)
 				curl_easy_setopt(curl, CURLOPT_PROXY, proxy[0]);
 			g_strfreev(proxy);
 		}
@@ -364,8 +386,11 @@ void my_curl_thread(MyCurlThreadData *data, MyCurl *self) {
 	priv->down_list = g_list_append(priv->down_list, data);
 	g_mutex_unlock(priv->mutex);
 	data->code = curl_easy_perform(curl);
-	if (data->file != NULL)
-		fclose(data->file);
+	if (data->file != NULL) {
+		g_io_channel_shutdown(data->file, TRUE, NULL);
+		g_io_channel_unref(data->file);
+		data->file = NULL;
+	}
 	g_mutex_lock(priv->mutex);
 	priv->down_list = g_list_remove(priv->down_list, data);
 	priv->finish_list = g_list_append(priv->finish_list, data);
@@ -403,14 +428,13 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 		gtk_tree_model_get(dl_store, &iter, down_col_uri, &uri,
 				down_col_save_local, &local, down_col_name, &filename, -1);
 		gtk_tree_path_free(path);
-		gtk_list_store_set(dl_store, &iter, down_col_name, filename, -1);
 		data->file = NULL;
 		data->timeout = timeout;
 		data->mutex = g_mutex_new();
 		data->down_start_time_unix = g_date_time_to_unix(now);
-		g_thread_pool_push(priv->pool, data, NULL);
 		data->filename = filename;
 		data->local = local;
+		g_thread_pool_push(priv->pool, data, NULL);
 		g_free(uri);
 		my_download_ui_mutex_unlock(priv->ui);
 		data = g_async_queue_try_pop_unlocked(priv->download_queue);
@@ -550,7 +574,8 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 }
 
 void my_curl_add_download(MyCurl *mycurl, gchar *uri, gchar *cookie,
-		gchar *prefix, gchar *suffix, gchar *save_dir, gchar *f_name,void *cookies_cb_data,void *filename_cb_data,void *proxy_cb_data,
+		gchar *prefix, gchar *suffix, gchar *save_dir, gchar *f_name,
+		void *cookies_cb_data, void *filename_cb_data, void *proxy_cb_data,
 		gboolean force_uri_as_filename) {
 	guint i = 0;
 	gboolean uri_as_filename = force_uri_as_filename;
@@ -621,7 +646,7 @@ void my_curl_add_download(MyCurl *mycurl, gchar *uri, gchar *cookie,
 		temp = g_strdup_printf("%s%s%s", prefix, filename, suffix);
 		g_free(filename);
 		filename = temp;
-		data = g_malloc0(sizeof(MyCurlThreadData));
+		data = g_malloc0(sizeof(MyCurlThreadData) + 1);
 		gtk_list_store_append(dl_store, &iter);
 		gtk_list_store_set(dl_store, &iter, down_col_name, filename,
 				down_col_save_local, save_local, down_col_uri, str,
@@ -642,7 +667,7 @@ void my_curl_add_download(MyCurl *mycurl, gchar *uri, gchar *cookie,
 		data->delete = FALSE;
 		data->set_cookies_data = cookies_cb_data;
 		data->set_filename_data = filename_cb_data;
-		data->get_proxy_data=proxy_cb_data;
+		data->get_proxy_data = proxy_cb_data;
 		data->filename = filename;
 		g_async_queue_push(priv->download_queue, data);
 		gtk_tree_path_free(tree_path);

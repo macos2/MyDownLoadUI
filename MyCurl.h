@@ -8,6 +8,7 @@
 #ifndef MYCURL_H_
 #define MYCURL_H_
 
+#include <unistd.h>
 #include <glib-object.h>
 #include <gtk/gtk.h>
 #include <curl/curl.h>

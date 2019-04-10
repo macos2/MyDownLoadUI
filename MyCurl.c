@@ -249,9 +249,10 @@ size_t my_curl_write_callback(char *ptr, size_t size, size_t nmemb,
 				break;
 			case add_suffix:
 				while (g_access(dfile, F_OK) == 0) {
+					i=0;
 					g_free(dfile);
 					dfile = g_strdup_printf("%s%s%s.%02d", data->local,
-					G_DIR_SEPARATOR_S, filename, i);
+					G_DIR_SEPARATOR_S, filename, i++);
 				}
 				break;
 			case over_write:

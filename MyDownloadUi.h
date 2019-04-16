@@ -37,6 +37,7 @@ typedef enum {
 	down_col_elapsed,
 	down_col_speed,
 	down_col_file_size,//not display ,use for sort the size
+	down_col_reply,
 } down_col;
 
 typedef enum {
@@ -84,6 +85,7 @@ DEC_GET_SET_PROP(MyDownloadUi,my_download_ui,"uri as filename",force_uri_as_name
 DEC_GET_SET_PROP(MyDownloadUi,my_download_ui,"same-name-operation",same_name_op,same_name_operation);
 DEC_GET_SET_PROP(MyDownloadUi,my_download_ui,"timeout",timeout,guint);
 DEC_GET_SET_PROP(MyDownloadUi,my_download_ui,"save-dir",default_dir,gchar*);
+DEC_GET_SET_PROP(MyDownloadUi,my_download_ui,"reply",reply,guint);
 
 void my_download_ui_mutex_lock(MyDownloadUi *down);
 void my_download_ui_mutex_unlock(MyDownloadUi *down);

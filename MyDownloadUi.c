@@ -28,6 +28,7 @@ enum {
 	prop_error_count,
 	prop_save_dir,
 	prop_uri_as_filename,
+	prop_reply,
 	n_prop
 };
 
@@ -39,7 +40,7 @@ typedef struct {
 	GtkTextBuffer *add_uri_buffer;
 	GtkDialog *add_dialog, *set_dialog;
 	guint downloading;
-	GtkAdjustment *max_count, *timeout;
+	GtkAdjustment *max_count, *timeout,*reply;
 	GtkFileChooser *save_dir_chooser,*add_dialog_local;
 	GtkImage *state_download, *state_stop, *state_error, *state_retry,
 			*state_finish, *state_wait;
@@ -93,6 +94,9 @@ void my_download_ui_set_property(MyDownloadUi *self, guint property_id,
 		gtk_toggle_button_set_active(priv->uri_as_filename,
 				g_value_get_boolean(value));
 		break;
+	case prop_reply:
+		gtk_adjustment_set_value(priv->reply,g_value_get_uint(value));
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(self, property_id, pspec);
 		break;
@@ -131,6 +135,9 @@ void my_download_ui_get_property(MyDownloadUi *self, guint property_id,
 	case prop_uri_as_filename:
 		g_value_set_boolean(value,
 				gtk_toggle_button_get_active(priv->uri_as_filename));
+		break;
+	case prop_reply:
+		g_value_set_uint(value,gtk_adjustment_get_value(priv->reply));
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(self, property_id, pspec);
@@ -427,6 +434,8 @@ static void my_download_ui_class_init(MyDownloadUiClass *klass) {
 	PROP[prop_uri_as_filename] = g_param_spec_boolean("uri-as-filename",
 			"uri as filename", "uri as filename", FALSE,
 			G_PARAM_READWRITE | G_PARAM_CONSTRUCT);
+	PROP[prop_reply] = g_param_spec_uint("reply", "reply", "reply", 0,
+	G_MAXUINT, 3, G_PARAM_READWRITE | G_PARAM_CONSTRUCT);
 	g_object_class_install_properties(obj_class, n_prop, PROP);
 	g_signal_new("add-download-uri", MY_TYPE_DOWNLOAD_UI, G_SIGNAL_RUN_LAST,
 			G_STRUCT_OFFSET(MyDownloadUiClass, add_download_uri), NULL, NULL,
@@ -504,6 +513,8 @@ static void my_download_ui_class_init(MyDownloadUiClass *klass) {
 			add_dialog_suffix);//add_dialog_special_local
 	gtk_widget_class_bind_template_child_private(klass, MyDownloadUi,
 			add_dialog_special_local);
+	gtk_widget_class_bind_template_child_private(klass, MyDownloadUi,
+			reply);
 	gtk_widget_class_bind_template_callback(klass, add_dialog_cancle);
 	gtk_widget_class_bind_template_callback(klass, add_dialog_ok);
 	gtk_widget_class_bind_template_callback(klass, finish_tree_view_press);
@@ -616,6 +627,7 @@ DEF_GET_SET_PROP(MyDownloadUi,my_download_ui,"uri as filename",force_uri_as_name
 DEF_GET_SET_PROP(MyDownloadUi,my_download_ui,"same-name-operation",same_name_op,same_name_operation);
 DEF_GET_SET_PROP(MyDownloadUi,my_download_ui,"timeout",timeout,guint);
 DEF_GET_SET_PROP(MyDownloadUi,my_download_ui,"save-dir",default_dir,gchar*);
+DEF_GET_SET_PROP(MyDownloadUi,my_download_ui,"reply",reply,guint);
 
 void my_download_ui_mutex_lock(MyDownloadUi *down) {
 	MyDownloadUiPrivate *priv = my_download_ui_get_instance_private(down);

@@ -34,7 +34,7 @@ typedef struct {
 	curl_off_t pdlnow, pulnow, resume_offset;
 	GMutex *mutex;
 	GIOChannel *file;
-	guint timeout;
+	guint timeout,reply,max_reply;
 	gchar *uri, *cookie, *suggest_filename, *filename, *local;
 	CURLcode code;
 	gint64 down_start_time_unix;
@@ -350,6 +350,7 @@ void my_curl_thread(MyCurlThreadData *data, MyCurl *self) {
 	gchar **proxy;
 	GDateTime *now = g_date_time_new_now_local();
 	data->down_start_time_unix = g_date_time_to_unix(now);
+	data->reply=0;
 	g_date_time_unref(now);
 	MyCurlPrivate *priv = my_curl_get_instance_private(self);
 	curl = curl_easy_init();
@@ -389,6 +390,10 @@ void my_curl_thread(MyCurlThreadData *data, MyCurl *self) {
 	priv->down_list = g_list_append(priv->down_list, data);
 	g_mutex_unlock(priv->mutex);
 	data->code = curl_easy_perform(curl);
+	while(data->code!= CURLE_OK && data->reply < data->max_reply){
+		data->reply++;
+		data->code = curl_easy_perform(curl);
+	}
 	if (data->file != NULL) {
 		g_io_channel_shutdown(data->file, TRUE, NULL);
 		g_io_channel_unref(data->file);
@@ -493,6 +498,7 @@ gboolean my_curl_watch_func(MyCurl *mycurl) {
 				down_col_elapsed, elapsed_format, down_col_state, Downloading,
 				down_col_state_pixbuf,
 				my_download_ui_get_download_state_pixbuf(priv->ui, Downloading),
+				down_col_reply,data->reply,
 				-1);
 		g_free(elapsed_format);
 		g_free(speed_format);
@@ -677,6 +683,7 @@ void my_curl_add_download(MyCurl *mycurl, gchar *uri, gchar *cookie,
 		data->get_proxy_data = proxy_cb_data;
 		data->finish_data=finish_cb_data;
 		data->filename = filename;
+		data->max_reply=my_download_ui_get_reply(priv->ui);
 		g_async_queue_push(priv->download_queue, data);
 		gtk_tree_path_free(tree_path);
 		g_object_unref(file);

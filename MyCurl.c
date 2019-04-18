@@ -391,6 +391,7 @@ void my_curl_thread(MyCurlThreadData *data, MyCurl *self) {
 	g_mutex_unlock(priv->mutex);
 	data->code = curl_easy_perform(curl);
 	while(data->code!= CURLE_OK && data->reply < data->max_reply){
+		if(data->dlnow>0)data->reply=0;
 		data->reply++;
 		data->resume_offset += data->dlnow;
 		curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE, data->resume_offset);

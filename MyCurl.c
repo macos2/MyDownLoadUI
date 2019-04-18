@@ -392,6 +392,8 @@ void my_curl_thread(MyCurlThreadData *data, MyCurl *self) {
 	data->code = curl_easy_perform(curl);
 	while(data->code!= CURLE_OK && data->reply < data->max_reply){
 		data->reply++;
+		data->resume_offset += data->dlnow;
+		curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE, data->resume_offset);
 		data->code = curl_easy_perform(curl);
 	}
 	if (data->file != NULL) {

@@ -224,7 +224,7 @@ size_t my_curl_write_callback(char *ptr, size_t size, size_t nmemb,
 	MyCurlPrivate *priv = my_curl_get_instance_private(data->mycurl);
 	same_name_operation sop;
 	gint i = 0;
-	gsize res;
+	gsize res=0;
 	if (data->file == NULL) {
 		if (priv->set_filename_callback != NULL) {
 			t = priv->set_filename_callback(data->suggest_filename,
@@ -279,7 +279,7 @@ size_t my_curl_write_callback(char *ptr, size_t size, size_t nmemb,
 		g_free(path);
 		g_object_unref(parent);
 		g_object_unref(file);
-		data->file = g_io_channel_new_file(dfile, "w+", NULL);
+		if(data->stop == FALSE)data->file = g_io_channel_new_file(dfile, "w+", NULL);
 		g_io_channel_set_encoding(data->file, NULL, NULL);
 		g_free(dfile);
 		g_free(data->filename);
@@ -290,7 +290,7 @@ size_t my_curl_write_callback(char *ptr, size_t size, size_t nmemb,
 		data->filename = filename;
 #endif
 	}
-	g_io_channel_write(data->file, ptr, size * nmemb, &res);
+	if(data->stop == FALSE)g_io_channel_write(data->file, ptr, size * nmemb, &res);
 	return res;
 	/*
 	 res = nmemb * size;

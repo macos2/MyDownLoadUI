@@ -227,7 +227,7 @@ void view_open(GtkTreeView *tree_view, gboolean open_dir, MyDownloadUi *self) {
 	guint col_name, col_local;
 	gchar *name, *local, *temp;
 	GtkTreeIter iter;
-	GFile *file;
+	GFile *file,*temp_file;
 	my_download_ui_mutex_lock(self);
 	if (tree_view == priv->down_tree_view) {
 		col_name = down_col_name;
@@ -241,15 +241,17 @@ void view_open(GtkTreeView *tree_view, gboolean open_dir, MyDownloadUi *self) {
 		gtk_tree_model_get_iter(model, &iter, list->data);
 		gtk_tree_model_get(model, &iter, col_name, &name, col_local, &local,
 				-1);
+		temp = g_strdup_printf("%s%s%s", local, G_DIR_SEPARATOR_S, name);
+		temp_file=g_file_new_for_path(temp);
+		g_free(temp);
 		if (open_dir) {
-			file = g_file_new_for_path(local);
+			file = g_file_get_parent(temp_file);
 		} else {
-			temp = g_strdup_printf("%s%s%s", local, G_DIR_SEPARATOR_S, name);
-			file = g_file_new_for_path(temp);
-			g_free(temp);
+			file = g_object_ref(temp_file);
 		}
 		temp = g_file_get_uri(file);
 		gtk_show_uri_on_window(self, temp, GDK_CURRENT_TIME, NULL);
+		g_object_unref(temp_file);
 		g_object_unref(file);
 		g_free(temp);
 		g_free(local);

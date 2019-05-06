@@ -51,6 +51,7 @@ typedef enum {
 	finish_col_size_format,
 	finish_col_uri,
 	finish_col_error,
+	finish_col_thread_data,//not display ,use for sort the thread data
 } finish_col;
 
 #define MY_TYPE_DOWNLOAD_UI my_download_ui_get_type()

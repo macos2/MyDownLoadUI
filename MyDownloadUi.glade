@@ -125,6 +125,8 @@
       <column type="gchararray"/>
       <!-- column-name error -->
       <column type="gchararray"/>
+      <!-- column-name thread_data -->
+      <column type="gpointer"/>
     </columns>
   </object>
   <object class="GtkMenu" id="finish_menu">

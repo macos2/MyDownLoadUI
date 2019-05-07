@@ -85,6 +85,7 @@ static void my_soup_dl_class_init(MySoupDlClass *klass) {
 			G_STRUCT_OFFSET(MySoupDlClass, set_name), NULL, NULL, NULL,
 			G_TYPE_STRING, 3, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_POINTER,
 			NULL);
+	g_signal_new("download_finish",MY_TYPE_SOUP_DL,G_SIGNAL_RUN_LAST,G_STRUCT_OFFSET(MySoupDlClass,download_finish),NULL,NULL,NULL,G_TYPE_NONE,4,G_TYPE_STRING,G_TYPE_STRING,G_TYPE_STRING,G_TYPE_POINTER,NULL);
 }
 
 static void my_soup_dl_init(MySoupDl *self) {
@@ -141,9 +142,9 @@ void my_soup_dl_thread(Thread_data *data, MySoupDl *self) {
 	if (w->filename == NULL) {
 		g_signal_emit_by_name(self, "set_name", w->uri, w->suggest_name,
 				data->user_data, &w->filename);
-		if (w->filename == NULL || g_strcmp0(w->filename, "")) {
+		if (w->filename == NULL || g_strcmp0(w->filename, "")==0) {
 			g_free(w->filename);
-			if (w->suggest_name == NULL) {
+			if (w->suggest_name == NULL||g_strcmp0(w->suggest_name, "")==0) {
 				file = g_file_new_for_path(w->uri);
 				temp = g_file_get_basename(file);
 				strv=g_strsplit(temp,"?",2);
@@ -202,6 +203,7 @@ void my_soup_dl_thread(Thread_data *data, MySoupDl *self) {
 
 	out=NULL;
 	if(!g_cancellable_is_cancelled(w->cancle)){
+		g_mkdir_with_parents(w->local,0777);
 	if (data->state == Retry) {
 		out = g_file_append_to(file, G_FILE_CREATE_NONE, NULL, NULL);
 	} else {
@@ -239,6 +241,7 @@ void my_soup_dl_thread(Thread_data *data, MySoupDl *self) {
 		if (w->timeout_reach && !w->reply_reach) {
 			w->timeout = 0;
 			w->reply++;
+			w->timeout_reach=FALSE;
 			g_input_stream_close(in, NULL, NULL);
 			g_object_unref(in);
 			soup_message_headers_set_range(msg->request_headers, data->loaded,
@@ -331,7 +334,7 @@ void my_soup_dl_watch_update_download_row(MySoupDl *dl, Thread_data *data) {
 	dlsize_size = g_strdup_printf("%s/%s", t1, t2);
 	g_free(t1);
 	g_free(t2);
-	t1 = format_size(w->speed * 2);
+	t1 = format_size(w->speed * 4);
 	speed = g_strdup_printf("%s/s", t1);
 	g_free(t1);
 	progress = 0;
@@ -418,6 +421,7 @@ gboolean my_soup_dl_watch(MySoupDl *dl) {
 		case Finish:
 			my_soup_dl_watch_moveto_finish_table(dl, data);
 			rl = g_list_append(rl, l->data);
+			g_signal_emit_by_name(dl,"download_finish",w->uri,w->filename,w->local,data->user_data,NULL);
 			watch_data_free(data->w);
 			data->w = NULL;
 			break;
@@ -426,16 +430,15 @@ gboolean my_soup_dl_watch(MySoupDl *dl) {
 				my_soup_dl_watch_update_download_row(dl, data);
 			} else if (w->stop) {
 				my_soup_dl_watch_moveto_finish_table(dl, data);
+				g_signal_emit_by_name(dl,"download_finish",w->uri,w->filename,w->local,data->user_data,NULL);
 				watch_data_free(data->w);
 				data->w = NULL;
 			}
 			rl = g_list_append(rl, l->data);
 			break;
-		case Wait:
-		case Retry:
 		case Downloading:
 			my_soup_dl_watch_update_download_row(dl, data);
-			if (w->speed * 2 < 20480) {
+			if (w->speed * 4 < 20480) {
 				w->timeout++;
 			} else {
 				w->timeout = 0;
@@ -448,6 +451,8 @@ gboolean my_soup_dl_watch(MySoupDl *dl) {
 			if (w->reply >= my_download_ui_get_reply(priv->ui))
 				w->reply_reach = TRUE;
 			break;
+		case Retry:
+		case Wait:
 		default:
 			break;
 		}
@@ -572,11 +577,11 @@ void my_soup_dl_ui_down_menu_del(MyDownloadUi *ui, GtkTreeRowReference *ref,
 	gtk_tree_model_get(down_store, &iter,  down_col_thread_data, &data, -1);
 	priv->working = g_list_remove(priv->working, data);
 	if (data->w != NULL) {
-		w = data->w;
 		g_mutex_lock(&w->mux);
 		w->stop = TRUE;
 		w->self_release=TRUE;
 		g_cancellable_cancel(w->cancle);
+		g_signal_emit_by_name(dl,"download_finish",w->uri,w->filename,w->local,data->user_data,NULL);
 		g_mutex_unlock(&w->mux);
 	}
 }
@@ -618,6 +623,7 @@ void my_soup_dl_ui_down_menu_resume(MyDownloadUi *ui, GtkTreeRowReference *ref,
 	gtk_tree_model_get_iter(down_store, &iter, path);
 	gtk_tree_path_free(path);
 	gtk_tree_model_get(down_store, &iter, down_col_thread_data, &data, -1);
+
 	if (data->state == Stop) {
 		priv->working = g_list_remove(priv->working, data);
 		w = data->w;
@@ -625,6 +631,7 @@ void my_soup_dl_ui_down_menu_resume(MyDownloadUi *ui, GtkTreeRowReference *ref,
 		w->plused = FALSE;
 		data->state = Retry;
 		g_async_queue_push(priv->queue, data);
+		gtk_list_store_set(down_store,&iter,down_col_state,Retry,down_col_state_pixbuf,my_download_ui_get_download_state_pixbuf(priv->ui,Retry),-1);
 	}
 	if (priv->source_id == 0)
 		priv->source_id = g_timeout_add(250, my_soup_dl_watch, dl);
@@ -687,3 +694,12 @@ gboolean my_soup_dl_add_download(MySoupDl *dl, const gchar *uri,
 	return TRUE;
 }
 ;
+
+guint my_soup_dl_get_downloading_count(MySoupDl *dl,gboolean wait_included){
+	MySoupDlPrivate *priv = my_soup_dl_get_instance_private(dl);
+	guint num=g_thread_pool_get_num_threads(priv->pool);
+	if(wait_included){
+		num+=g_queue_get_length(priv->queue);
+	}
+	return num;
+};

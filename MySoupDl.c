@@ -97,7 +97,7 @@ static void my_soup_dl_init(MySoupDl *self) {
 }
 
 void my_soup_dl_thread(Thread_data *data, MySoupDl *self) {
-	gchar buf[262144], *temp, *temp2,**strv;
+	gchar buf[524288], *temp, *temp2,**strv;
 	gsize received;
 	GHashTable *head_table;
 	gchar *dis_type;
@@ -205,36 +205,49 @@ void my_soup_dl_thread(Thread_data *data, MySoupDl *self) {
 	if(!g_cancellable_is_cancelled(w->cancle)){
 		g_mkdir_with_parents(w->local,0777);
 	if (data->state == Retry) {
-		out = g_file_append_to(file, G_FILE_CREATE_NONE, NULL, NULL);
+		out = g_file_append_to(file, G_FILE_CREATE_NONE, NULL,  &w->error);
 	} else {
 		out = g_file_create(file, G_FILE_CREATE_REPLACE_DESTINATION, NULL,
-		NULL);
+				 &w->error);
 	}
 	}
-	while (!w->reply_reach&&out!=NULL) {
+	if(out==NULL){
+		g_mutex_lock(&w->mux);
+		data->state = Error;
+		g_mutex_unlock(&w->mux);
+	}
+	while (out!=NULL) {
 		if(data->len!=0){
 		while (data->loaded < data->len) {
 			received = 0;
-			received = g_input_stream_read(in, buf, 262144, w->cancle, NULL);
+			received = g_input_stream_read(in, buf, 524288, w->cancle, NULL);
 			g_mutex_lock(&w->mux);
+			if (g_cancellable_is_cancelled(w->cancle)){
+				g_mutex_unlock(&w->mux);
+				break;
+			}else{
 			g_output_stream_write(out, buf, received, NULL, NULL);
 			data->loaded += received;
 			w->speed += received;
+				}
 			g_mutex_unlock(&w->mux);
-			if (g_cancellable_is_cancelled(w->cancle))
-				break;
-			data->state = Downloading;}
+
+			data->state = Downloading;
+		}
 		}else{
 			while (received!=0) {
 				received = 0;
-				received = g_input_stream_read(in, buf, 262144, w->cancle, NULL);
+				received = g_input_stream_read(in, buf, 524288, w->cancle, NULL);
 				g_mutex_lock(&w->mux);
+				if (g_cancellable_is_cancelled(w->cancle)){
+					g_mutex_unlock(&w->mux);
+					break;
+				}else{
 				g_output_stream_write(out, buf, received, NULL, NULL);
 				data->loaded += received;
 				w->speed += received;
+					}
 				g_mutex_unlock(&w->mux);
-				if (g_cancellable_is_cancelled(w->cancle))
-					break;
 				data->state = Downloading;
 			}
 		}
@@ -316,7 +329,7 @@ void my_soup_dl_watch_update_download_row(MySoupDl *dl, Thread_data *data) {
 	time_t elapsed = current - w->start_time_unix;
 	GDateTime *s = g_date_time_new_from_unix_local(w->start_time_unix);
 	GDateTime *e = g_date_time_new_from_unix_utc(elapsed);
-	start_time_format = g_date_time_format(s, "%c");
+	start_time_format = g_date_time_format(s, "%Y-%m-%d %H:%M:%S");
 	elapsed_time_format = g_date_time_format(e, "%H:%M:%S");
 
 	dl_store = my_download_ui_get_download_store(priv->ui);
@@ -365,7 +378,7 @@ void my_soup_dl_watch_moveto_finish_table(MySoupDl *dl, Thread_data *data) {
 	gchar *filename, *dlsize_size, *speed, *t1, *t2, *time_format;
 	GDateTime *time = g_date_time_new_now_local();
 	gsize size;
-	time_format = g_date_time_format(time, "%c");
+	time_format = g_date_time_format(time, "%Y-%m-%d %H:%M:%S");
 	dl_store = my_download_ui_get_download_store(priv->ui);
 	fin_store = my_download_ui_get_finish_store(priv->ui);
 

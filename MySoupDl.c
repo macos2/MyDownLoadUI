@@ -141,7 +141,7 @@ void my_soup_dl_thread(Thread_data *data, MySoupDl *self) {
 		g_free(dis_type);
 	}
 
-	if (w->filename == NULL) {
+	if (w->filename == NULL||g_strcmp0(w->filename, "")==0||g_strcmp0(w->filename, "/")==0) {
 		g_signal_emit_by_name(self, "set_name", w->uri, w->suggest_name,
 				data->user_data, &w->filename);
 		if (w->filename == NULL || g_strcmp0(w->filename, "")==0) {

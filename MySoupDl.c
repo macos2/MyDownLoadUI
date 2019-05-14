@@ -105,13 +105,26 @@ void my_soup_dl_thread(Thread_data *data, MySoupDl *self) {
 	Watch_data *w = data->w;
 	MySoupDlPrivate *priv = my_soup_dl_get_instance_private(self);
 	SoupMessage *msg = soup_message_new("GET", w->uri);
+	GInputStream *in=NULL;
+	GOutputStream *out=NULL;
 	if (data->state == Retry){
 		if(data->loaded==data->len)data->loaded=0;
 		soup_message_headers_set_range(msg->request_headers, data->loaded,
 				data->len);
 	}
-	GInputStream *in = soup_session_send(priv->session, msg, w->cancle, &w->error);
-	GOutputStream *out;
+	while(in==NULL&&w->reply_reach==FALSE){
+		g_mutex_lock(&w->mux);
+		if(w->error!=NULL){
+			g_error_free(w->error);
+			w->error=NULL;
+		}
+		g_mutex_unlock(&w->mux);
+	in = soup_session_send(priv->session, msg, w->cancle, &w->error);
+	g_mutex_lock(&w->mux);
+	if(in==NULL)w->reply++;
+	g_mutex_unlock(&w->mux);
+	}
+	//in = soup_session_send(priv->session, msg, w->cancle, &w->error);
 	g_mutex_lock(&w->mux);
 	w->start_time_unix = time(NULL);
 	if (in == NULL) {
@@ -715,7 +728,7 @@ guint my_soup_dl_get_downloading_count(MySoupDl *dl,gboolean wait_included){
 	MySoupDlPrivate *priv = my_soup_dl_get_instance_private(dl);
 	guint num=g_thread_pool_get_num_threads(priv->pool);
 	if(wait_included){
-		num+=g_queue_get_length(priv->queue);
+		num+=g_async_queue_length(priv->queue);
 	}
 	return num;
 };

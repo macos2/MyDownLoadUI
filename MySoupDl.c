@@ -112,7 +112,7 @@ void my_soup_dl_thread(Thread_data *data, MySoupDl *self) {
 		soup_message_headers_set_range(msg->request_headers, data->loaded,
 				data->len);
 	}
-	while(in==NULL&&w->reply_reach==FALSE){
+	while(in==NULL&&w->reply_reach==FALSE&&g_cancellable_is_cancelled(w->cancle)==FALSE){
 		g_mutex_lock(&w->mux);
 		if(w->error!=NULL){
 			g_error_free(w->error);

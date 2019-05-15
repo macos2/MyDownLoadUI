@@ -299,7 +299,6 @@
                     <property name="sort_column_id">0</property>
                     <child>
                       <object class="GtkCellRendererText" id="d_0">
-                        <property name="width_chars">20</property>
                         <property name="max_width_chars">40</property>
                       </object>
                       <attributes>

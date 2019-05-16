@@ -436,6 +436,7 @@ void my_soup_dl_message_got_headers(SoupMessage *msg, Thread_data *data) {
 	gchar *temp, *dis_type;
 	GHashTable *head_table=NULL;
 	Watch_data *w = data->w;
+	if(w==NULL)return;
 	w->start_time_unix = time(NULL);
 	if (data->state == Retry) {
 		if (msg->status_code == SOUP_STATUS_OK) {
@@ -462,6 +463,11 @@ void my_soup_dl_message_finished(SoupMessage *msg, Thread_data *data) {
 	if ((msg->status_code != SOUP_STATUS_OK	|| msg->status_code != SOUP_STATUS_PARTIAL_CONTENT)&&data->state!=Stop)
 		data->state = Error;
 	if(data->state==Downloading)data->state=Finish;
+	if(data->w!=NULL){
+		if(data->w->error!=NULL){
+			data->w->error=g_error_new(soup_http_error_quark(),0,"%s",soup_status_get_phrase(msg->status_code));
+		}
+	}
 }
 
 void my_soup_dl_message_read(GInputStream *in, GAsyncResult *res,
@@ -470,8 +476,17 @@ void my_soup_dl_message_read(GInputStream *in, GAsyncResult *res,
 	Watch_data *w = data->w;
 	if(w==NULL)return;
 	if(g_cancellable_is_cancelled(w->cancle)==TRUE){
+		if(w->timeout_reach==TRUE){//速度过低
+			g_input_stream_close(w->in,NULL,NULL);
+			g_object_unref(in);
+			data->state=Retry;
+			g_cancellable_reset(w->cancle);
+			w->timeout_reach=FALSE;
+			my_soup_dl_download_start(w->dl,data);
+		}else{//用户停止
 		data->state=Stop;
 		w->plused=TRUE;
+		}
 		return;
 	}
 	gsize size = g_input_stream_read_finish(in, res, &err);
@@ -502,15 +517,17 @@ void my_soup_dl_download_start_cb(SoupSession *session, GAsyncResult *res,
 		Thread_data *data) {
 	GError *err = NULL;
 	Watch_data *w = data->w;
-	if(data->state==Stop)return;//may be skip if the file exist with the same file op apply;
+	if(data->state==Stop||data->state==Error)return;//may be skip if the file exist with the same file op apply;
 	GInputStream *in = soup_session_send_finish(session, res, &err);
 	if (in == NULL && w->reply_reach) {
 		data->state = Error;
 		w->error = err;
 	} else if (in == NULL) {
 		w->reply++;
+		data->state=Retry;
 		my_soup_dl_download_start(w->dl, data);
 	} else {
+		if(data->state!=Retry)w->reply=0;
 		w->in=in;
 		g_input_stream_read_async(in, w->buf, BUF_SIZE, G_PRIORITY_DEFAULT,
 				w->cancle, my_soup_dl_message_read, data);
@@ -684,22 +701,24 @@ gboolean my_soup_dl_watch(MySoupDl *dl) {
 			rl = g_list_append(rl, l->data);
 			break;
 		case Downloading:
-			my_soup_dl_watch_update_download_row(dl, data);
 			if (w->speed * 4 < 20480) {
 				w->timeout++;
 			} else {
 				w->timeout = 0;
 			}
 			w->speed = 0;
-			if ((w->timeout / 2) > my_download_ui_get_timeout(priv->ui)) {
+			if ((w->timeout / 4) > my_download_ui_get_timeout(priv->ui)) {
 				w->timeout_reach = TRUE;
 				g_cancellable_cancel(w->cancle);
 			}
 			if (w->reply >= my_download_ui_get_reply(priv->ui))
 				w->reply_reach = TRUE;
+			my_soup_dl_watch_update_download_row(dl, data);
 			break;
 		case Retry:
 		case Wait:
+			my_soup_dl_watch_update_download_row(dl, data);
+			break;
 		default:
 			break;
 		}

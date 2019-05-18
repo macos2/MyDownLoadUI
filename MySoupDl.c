@@ -565,10 +565,19 @@ void my_soup_dl_watch_update_download_row(MySoupDl *dl, Thread_data *data) {
 
 	time_t current = time(NULL);
 	time_t elapsed = current - w->start_time_unix;
-	GDateTime *s = g_date_time_new_from_unix_local(w->start_time_unix);
-	GDateTime *e = g_date_time_new_from_unix_utc(elapsed);
-	start_time_format = g_date_time_format(s, "%Y-%m-%d %H:%M:%S");
-	elapsed_time_format = g_date_time_format(e, "%H:%M:%S");
+	if(w->start_time_unix==0){
+		start_time_format = g_strdup("");
+		elapsed_time_format = g_strdup("");
+	}else{
+		GDateTime *s = g_date_time_new_from_unix_local(w->start_time_unix);
+		start_time_format = g_date_time_format(s, "%Y-%m-%d %H:%M:%S");
+		g_date_time_unref(s);
+
+		GDateTime *e = g_date_time_new_from_unix_utc(elapsed);
+		elapsed_time_format = g_date_time_format(e, "%H:%M:%S");
+		g_date_time_unref(e);
+	}
+
 
 	dl_store = my_download_ui_get_download_store(priv->ui);
 	path = gtk_tree_row_reference_get_path(data->row_ref);
@@ -599,8 +608,7 @@ void my_soup_dl_watch_update_download_row(MySoupDl *dl, Thread_data *data) {
 			down_col_progress, progress, down_col_speed, speed, down_col_reply,
 			w->reply, down_col_elapsed, elapsed_time_format,
 			down_col_start_time, start_time_format, -1);
-	g_date_time_unref(s);
-	g_date_time_unref(e);
+
 	g_free(start_time_format);
 	g_free(elapsed_time_format);
 	g_free(dlsize_size);
@@ -701,6 +709,7 @@ gboolean my_soup_dl_watch(MySoupDl *dl) {
 			rl = g_list_append(rl, l->data);
 			break;
 		case Downloading:
+			my_soup_dl_watch_update_download_row(dl, data);
 			if (w->speed * 4 < 20480) {
 				w->timeout++;
 			} else {
@@ -713,7 +722,6 @@ gboolean my_soup_dl_watch(MySoupDl *dl) {
 			}
 			if (w->reply >= my_download_ui_get_reply(priv->ui))
 				w->reply_reach = TRUE;
-			my_soup_dl_watch_update_download_row(dl, data);
 			break;
 		case Retry:
 		case Wait:

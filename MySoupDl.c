@@ -53,7 +53,7 @@ gchar *format_size(gsize size) {
 
 G_DEFINE_TYPE_WITH_CODE(MySoupDl, my_soup_dl, G_TYPE_OBJECT,
 		G_ADD_PRIVATE(MySoupDl));
-void my_soup_dl_thread(Thread_data *data, MySoupDl *self);
+//void my_soup_dl_thread(Thread_data *data, MySoupDl *self);
 gboolean my_soup_dl_watch(MySoupDl *dl);
 void my_soup_dl_dispose(MySoupDl *self) {
 

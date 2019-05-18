@@ -20,7 +20,7 @@ typedef struct {
 	gchar buf[BUF_SIZE];
 	GOutputStream *out;
 	GInputStream *in;
-} Watch_data;
+} Watch_data;;
 
 typedef struct {
 	gsize len, loaded;

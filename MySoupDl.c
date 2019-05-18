@@ -433,7 +433,7 @@ GOutputStream *my_soup_dl_message_open_file(MySoupDl *self, Thread_data *data) {
 }
 
 void my_soup_dl_message_got_headers(SoupMessage *msg, Thread_data *data) {
-	gchar *temp, *dis_type;
+	gchar *temp, *dis_type=NULL;
 	GHashTable *head_table=NULL;
 	Watch_data *w = data->w;
 	if(w==NULL)return;

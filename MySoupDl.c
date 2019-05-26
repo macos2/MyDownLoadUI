@@ -433,7 +433,7 @@ GOutputStream *my_soup_dl_message_open_file(MySoupDl *self, Thread_data *data) {
 }
 
 void my_soup_dl_message_got_headers(SoupMessage *msg, Thread_data *data) {
-	gchar *temp, *dis_type=NULL;;
+	gchar *temp, *dis_type=NULL;
 	GHashTable *head_table=NULL;
 	Watch_data *w = data->w;
 	if(w==NULL)return;
@@ -464,7 +464,7 @@ void my_soup_dl_message_finished(SoupMessage *msg, Thread_data *data) {
 		data->state = Error;
 	if(data->state==Downloading)data->state=Finish;
 	if(data->w!=NULL){
-		if(data->w->error!=NULL){
+		if(data->w->error==NULL){
 			data->w->error=g_error_new(soup_http_error_quark(),0,"%s",soup_status_get_phrase(msg->status_code));
 		}
 	}

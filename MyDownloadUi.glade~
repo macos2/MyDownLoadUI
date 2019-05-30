@@ -294,6 +294,7 @@
                 <child>
                   <object class="GtkTreeViewColumn" id="down_col_name">
                     <property name="resizable">True</property>
+                    <property name="sizing">autosize</property>
                     <property name="title" translatable="yes">Name</property>
                     <property name="reorderable">True</property>
                     <property name="sort_column_id">0</property>

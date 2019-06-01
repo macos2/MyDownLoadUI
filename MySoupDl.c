@@ -242,12 +242,10 @@ void my_soup_dl_message_finished(SoupMessage *msg, Thread_data *data) {
 			data->state = Error;
 		else
 			data->state = Finish;
-		if (data->w != NULL) {
-			if (data->w->error == NULL) {
-				data->w->error = g_error_new(soup_http_error_quark(), 0, "%s",
-						soup_status_get_phrase(msg->status_code));
-			}
-		}
+		if (data->w != NULL)
+			g_error_free(data->w->error);
+		data->w->error = g_error_new(soup_http_error_quark(), 0, "%s",
+				soup_status_get_phrase(msg->status_code));
 		break;
 	default:
 		break;
@@ -312,8 +310,9 @@ void my_soup_dl_download_start_cb(SoupSession *session, GAsyncResult *res,
 	if (in == NULL) {
 		w->reply++;
 		data->state = Retry;
-		if(w->error!=NULL)g_error_free(w->error);
-		w->error=err;
+		if (w->error != NULL)
+			g_error_free(w->error);
+		w->error = err;
 		my_soup_dl_download_start(w->dl, data);
 	} else {
 		w->in = in;
@@ -327,10 +326,11 @@ void my_soup_dl_download_start(MySoupDl *self, Thread_data *data) {
 	Watch_data *w = data->w;
 	MySoupDlPrivate *priv = my_soup_dl_get_instance_private(self);
 
-	if (w->reply>my_download_ui_get_reply(priv->ui)) {
-		w->reply_reach=TRUE;
+	if (w->reply > my_download_ui_get_reply(priv->ui)) {
+		w->reply_reach = TRUE;
 		data->state = Error;
-		if(w->error==NULL)w->error = g_error_new(g_io_error_quark(), 0, "Max Reply Reach");
+		if (w->error == NULL)
+			w->error = g_error_new(g_io_error_quark(), 0, "Max Reply Reach");
 		return;
 	}
 
@@ -469,19 +469,19 @@ gboolean my_soup_dl_watch(MySoupDl *dl) {
 		data = l->data;
 		w = data->w;
 		switch (data->state) {
-		case Error:
 		case Finish:
-			my_soup_dl_watch_moveto_finish_table(dl, data);
-			rl = g_list_append(rl, l->data);
 			g_signal_emit_by_name(dl, "download_finish", w->uri, w->filename,
 					w->local, &data->user_data, NULL);
+		case Error:
+			my_soup_dl_watch_moveto_finish_table(dl, data);
+			rl = g_list_append(rl, l->data);
 			watch_data_free(data->w);
 			data->w = NULL;
 			break;
 		case Stop:
 			if (w->stop) {
-				g_signal_emit_by_name(dl, "download_finish", w->uri,
-						w->filename, w->local, &data->user_data, NULL);
+				/*g_signal_emit_by_name(dl, "download_finish", w->uri,
+						w->filename, w->local, &data->user_data, NULL);*/
 				if (w->self_release == TRUE) {
 					watch_data_free(data->w);
 					gtk_tree_row_reference_free(data->row_ref);
@@ -616,7 +616,7 @@ void my_soup_dl_ui_finish_menu_restart(MyDownloadUi *ui,
 	data->w->local = local;
 	data->w->uri = uri;
 	data->w->cancle = g_cancellable_new();
-	data->w->dl=dl;
+	data->w->dl = dl;
 	gtk_list_store_remove(finish_store, &iter);
 	gtk_list_store_append(down_store, &iter);
 	path = gtk_tree_model_get_path(down_store, &iter);

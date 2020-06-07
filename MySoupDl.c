@@ -189,6 +189,7 @@ GOutputStream *my_soup_dl_message_open_file(MySoupDl *self, Thread_data *data) {
 				out = g_file_append_to(file, G_FILE_CREATE_NONE, NULL,
 						&w->error);
 			} else {
+				g_file_delete(file);
 				out = g_file_replace(file, NULL, FALSE,
 						G_FILE_CREATE_REPLACE_DESTINATION, NULL, &w->error);
 			}
@@ -210,6 +211,11 @@ void my_soup_dl_message_got_headers(SoupMessage *msg, Thread_data *data) {
 	if (data->state == Retry) {
 		if (msg->status_code == SOUP_STATUS_OK) {
 			data->loaded = 0;
+			g_output_stream_close(w->out,NULL,NULL);
+			g_object_unref(w->out);
+			if(data->len==0)data->len = soup_message_headers_get_content_length(
+					msg->response_headers);
+			w->out = my_soup_dl_message_open_file(w->dl, data);
 		}
 	} else {
 		data->state = Wait;
@@ -428,7 +434,7 @@ void my_soup_dl_watch_moveto_finish_table(MySoupDl *dl, Thread_data *data) {
 	gtk_tree_path_free(path);
 	size = data->len == 0 ? data->loaded : data->len;
 	t1 = format_size(size);
-	if (w->error != NULL) {
+	if (w->error != NULL&&data->state!=Finish) {
 		t2 = g_strdup(w->error->message);
 	} else {
 		t2 = g_strdup("");

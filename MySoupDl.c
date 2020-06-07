@@ -189,7 +189,6 @@ GOutputStream *my_soup_dl_message_open_file(MySoupDl *self, Thread_data *data) {
 				out = g_file_append_to(file, G_FILE_CREATE_NONE, NULL,
 						&w->error);
 			} else {
-				g_file_delete(file);
 				out = g_file_replace(file, NULL, FALSE,
 						G_FILE_CREATE_REPLACE_DESTINATION, NULL, &w->error);
 			}
